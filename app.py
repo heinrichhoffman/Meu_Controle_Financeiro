@@ -52,6 +52,7 @@ except Exception as e:
 
 @st.cache_resource
 def init_db():
+    """Cria as tabelas do banco de dados se elas não existirem."""
     if DB_TYPE == "sql":
         with conn.session as s:
             s.execute(text("""
@@ -105,37 +106,51 @@ def save_transaction(data, categoria, descricao, valor, cartao):
         db_conn.close()
     st.cache_data.clear()
 
+# --- FUNÇÕES DE LOAD CORRIGIDAS ---
 def load_transactions(start_date, end_date):
-    if DB_TYPE == "sql":
-        query = "SELECT * FROM transacoes WHERE Data BETWEEN :start AND :end ORDER BY Data DESC"
-        df = conn.query(query, params=dict(start=start_date, end=end_date), ttl=60)
-    else:
-        query_sqlite = "SELECT * FROM transacoes WHERE Data BETWEEN ? AND ? ORDER BY Data DESC"
-        db_conn = get_db_connection_sqlite()
-        df = pd.read_sql_query(query_sqlite, db_conn, params=(start_date, end_date))
-        db_conn.close()
-    
-    if df.empty:
+    df = pd.DataFrame(columns=COLUNAS_TRANSACOES) # Inicializa um DF vazio
+    try:
+        if DB_TYPE == "sql":
+            query = "SELECT * FROM transacoes WHERE Data BETWEEN :start AND :end ORDER BY Data DESC"
+            df = conn.query(query, params=dict(start=start_date, end=end_date), ttl=60)
+        else:
+            query_sqlite = "SELECT * FROM transacoes WHERE Data BETWEEN ? AND ? ORDER BY Data DESC"
+            db_conn = get_db_connection_sqlite()
+            df = pd.read_sql_query(query_sqlite, db_conn, params=(start_date, end_date))
+            db_conn.close()
+    except Exception as e:
+        # Se a tabela não existir, a query falha. Nós pegamos o erro e retornamos o DF vazio.
+        st.error(f"Erro ao carregar transações: {e}")
         return pd.DataFrame(columns=COLUNAS_TRANSACOES)
+    
+    # --- CORREÇÃO DO KEYERROR ---
+    if df.empty or 'Data' not in df.columns:
+        return pd.DataFrame(columns=COLUNAS_TRANSACOES)
+    # --- FIM DA CORREÇÃO ---
 
-    if not df.empty:
-        df['Data'] = pd.to_datetime(df['Data'])
+    df['Data'] = pd.to_datetime(df['Data'])
     return df
 
 def load_all_transactions():
-    query = "SELECT * FROM transacoes ORDER BY Data DESC"
-    if DB_TYPE == "sql":
-        df = conn.query(query, ttl=60)
-    else:
-        db_conn = get_db_connection_sqlite()
-        df = pd.read_sql_query(query, db_conn)
-        db_conn.close()
-
-    if df.empty:
+    df = pd.DataFrame(columns=COLUNAS_TRANSACOES) # Inicializa um DF vazio
+    try:
+        query = "SELECT * FROM transacoes ORDER BY Data DESC"
+        if DB_TYPE == "sql":
+            df = conn.query(query, ttl=60)
+        else:
+            db_conn = get_db_connection_sqlite()
+            df = pd.read_sql_query(query, db_conn)
+            db_conn.close()
+    except Exception as e:
+        st.error(f"Erro ao carregar todas as transações: {e}")
         return pd.DataFrame(columns=COLUNAS_TRANSACOES)
 
-    if not df.empty:
-        df['Data'] = pd.to_datetime(df['Data'])
+    # --- CORREÇÃO DO KEYERROR ---
+    if df.empty or 'Data' not in df.columns:
+        return pd.DataFrame(columns=COLUNAS_TRANSACOES)
+    # --- FIM DA CORREÇÃO ---
+
+    df['Data'] = pd.to_datetime(df['Data'])
     return df
 
 def delete_transaction(id):
@@ -195,15 +210,20 @@ def save_fatura(cartao, mes_ano, valor):
     st.cache_data.clear()
 
 def load_faturas():
-    query = "SELECT * FROM faturas ORDER BY MesAno"
-    if DB_TYPE == "sql":
-        df = conn.query(query, ttl=60)
-    else:
-        db_conn = get_db_connection_sqlite()
-        df = pd.read_sql_query(query, db_conn)
-        db_conn.close()
+    df = pd.DataFrame(columns=COLUNAS_FATURAS) # Inicializa
+    try:
+        query = "SELECT * FROM faturas ORDER BY MesAno"
+        if DB_TYPE == "sql":
+            df = conn.query(query, ttl=60)
+        else:
+            db_conn = get_db_connection_sqlite()
+            df = pd.read_sql_query(query, db_conn)
+            db_conn.close()
+    except Exception as e:
+        st.error(f"Erro ao carregar faturas: {e}")
+        return pd.DataFrame(columns=COLUNAS_FATURAS)
     
-    if df.empty:
+    if df.empty or 'MesAno' not in df.columns:
         return pd.DataFrame(columns=COLUNAS_FATURAS)
     return df
 
@@ -231,23 +251,27 @@ def save_budget(categoria, valor):
     st.cache_data.clear()
 
 def load_budgets():
-    query = "SELECT * FROM orcamentos"
-    if DB_TYPE == "sql":
-        df = conn.query(query, ttl=60)
-    else:
-        db_conn = get_db_connection_sqlite()
-        df = pd.read_sql_query(query, db_conn)
-        db_conn.close()
-    
-    if df.empty:
+    df = pd.DataFrame(columns=COLUNAS_ORCAMENTOS) # Inicializa
+    try:
+        query = "SELECT * FROM orcamentos"
+        if DB_TYPE == "sql":
+            df = conn.query(query, ttl=60)
+        else:
+            db_conn = get_db_connection_sqlite()
+            df = pd.read_sql_query(query, db_conn)
+            db_conn.close()
+    except Exception as e:
+        st.error(f"Erro ao carregar orçamentos: {e}")
+        return pd.DataFrame(columns=COLUNAS_ORCAMENTOS)
+
+    if df.empty or 'Categoria' not in df.columns:
         return pd.DataFrame(columns=COLUNAS_ORCAMENTOS)
     return df
 
 # --- Inicializa o DB ---
 init_db()
 
-# --- CSS OTIMIZADO PARA MOBILE (Removido o CSS customizado dos KPIs) ---
-# (Mantemos apenas a otimização para mobile do flexbox, mas vamos simplificar)
+# --- CSS OTIMIZADO PARA MOBILE ---
 st.markdown("""
 <style>
 /* CSS para o container dos KPIs */
@@ -255,25 +279,46 @@ st.markdown("""
     display: flex;
     flex-wrap: wrap; 
     justify-content: space-around;
-    gap: 16px; /* Um espaço menor entre os cards */
+    gap: 20px;
 }
-
-/* O st.metric nativo já é um card no tema claro, 
-   mas vamos garantir que ele se comporte bem no flex */
-.kpi-container > div {
+/* CSS para os KPI Cards */
+.kpi-card {
+    background-color: #FFFFFF;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    text-align: center;
     flex-grow: 1;
+    flex-shrink: 1;
     flex-basis: 250px;
     min-width: 250px;
+    max-width: 350px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 130px;
 }
+.kpi-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #5A5A5A;
+    margin-bottom: 8px;
+}
+.kpi-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: #262730;
+}
+.kpi-value-positive { color: #28a745; }
+.kpi-value-negative { color: #dc3545; }
 
-/* Media Query para Telas Pequenas (Celulares) */
 @media (max-width: 768px) {
-    .kpi-container {
-        gap: 10px;
+    .kpi-card {
+        flex-basis: 100%;
+        min-height: 110px;
     }
-    .kpi-container > div {
-        flex-basis: 100%; /* Ocupa 100% no mobile */
-    }
+    .kpi-value { font-size: 28px; }
+    .kpi-title { font-size: 15px; }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -308,7 +353,7 @@ tab_dash, tab_cartoes, tab_orcamento = st.tabs([
 with tab_dash:
     today_dash = datetime.now() 
 
-    # --- Formulários movidos para o Expander ---
+    # --- CORREÇÃO MOBILE: Formulários movidos da Sidebar para o Expander ---
     with st.expander("Adicionar Transação ✍️", expanded=False):
         tab_receita, tab_despesa = st.tabs([" Receita ", " Despesa "])
 
@@ -388,18 +433,24 @@ with tab_dash:
     else:
         receita = despesa = saldo = 0.0
 
-    # --- MUDANÇA: USANDO st.metric EM VEZ DE HTML ---
-    # Envolvemos em um container de CSS para o layout flexível
-    st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(label="Receita Total 🟢", value=f"R$ {receita:,.2f}")
-    with col2:
-        st.metric(label="Despesa Total 🔴", value=f"R$ {despesa:,.2f}")
-    with col3:
-        st.metric(label="Saldo 🔵", value=f"R$ {saldo:,.2f}")
-    st.markdown('</div>', unsafe_allow_html=True)
-    # --- FIM DA MUDANÇA ---
+    saldo_color_class = "kpi-value-positive" if saldo >= 0 else "kpi-value-negative"
+
+    st.markdown(f"""
+    <div class="kpi-container">
+        <div class="kpi-card">
+            <div class="kpi-title">Receita Total 🟢</div>
+            <div class="kpi-value kpi-value-positive">R$ {receita:,.2f}</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-title">Despesa Total 🔴</div>
+            <div class="kpi-value kpi-value-negative">R$ {despesa:,.2f}</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-title">Saldo 🔵</div>
+            <div class="kpi-value {saldo_color_class}">R$ {saldo:,.2f}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
     st.markdown("<br/>", unsafe_allow_html=True) 
 
@@ -422,7 +473,7 @@ with tab_dash:
                 fig_pizza_desp = px.pie(
                     df_agrupado_desp, names='Categoria', values='Valor', hole=0.3
                 )
-                # MUDANÇA: Removido template="plotly_dark"
+                fig_pizza_desp.update_layout(template="plotly_dark") 
                 fig_pizza_desp.update_traces(textposition='inside', textinfo='percent+label')
                 st.plotly_chart(fig_pizza_desp, use_container_width=True)
 
@@ -437,7 +488,7 @@ with tab_dash:
                 fig_pizza_rec = px.pie(
                     df_agrupado_rec, names='Categoria', values='Valor', hole=0.3
                 )
-                # MUDANÇA: Removido template="plotly_dark"
+                fig_pizza_rec.update_layout(template="plotly_dark")
                 fig_pizza_rec.update_traces(textposition='inside', textinfo='percent+label')
                 st.plotly_chart(fig_pizza_rec, use_container_width=True)
 
@@ -483,7 +534,7 @@ with tab_dash:
                 title="Receitas vs Despesas por Mês",
                 color_discrete_map={'Receita': '#28a745', 'Despesa': '#dc3545'}
             )
-            # MUDANÇA: Removido template="plotly_dark"
+            fig_evolucao.update_layout(template="plotly_dark")
             st.plotly_chart(fig_evolucao, use_container_width=True)
 
     st.markdown("<br/>", unsafe_allow_html=True)
@@ -660,7 +711,7 @@ with tab_cartoes:
                 x="MesAno", y="ValorFatura", color="Cartao",
                 barmode="group", title="Valor Mensal das Faturas por Cartão"
             )
-            # MUDANÇA: Removido template="plotly_dark"
+            fig_barras.update_layout(template="plotly_dark")
             st.plotly_chart(fig_barras, use_container_width=True)
 
     st.markdown("<br/>", unsafe_allow_html=True)
