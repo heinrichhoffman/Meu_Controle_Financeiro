@@ -11,7 +11,7 @@ st.set_page_config(
     page_title="Meu Controle Financeiro",
     page_icon="💵", 
     layout="wide",
-    initial_sidebar_state="auto"  # Otimização para Mobile
+    initial_sidebar_state="auto"
 )
 
 # --- Constantes ---
@@ -28,16 +28,19 @@ CARTOES = [
     "Elo", "Azul", "Caju", "Outro"
 ]
 
+# Colunas Definidas para DataFrames vazios
+COLUNAS_TRANSACOES = ["id", "Data", "Categoria", "Descricao", "Valor", "Cartao"]
+COLUNAS_FATURAS = ["id", "Cartao", "MesAno", "ValorFatura"]
+COLUNAS_ORCAMENTOS = ["Categoria", "Valor"]
+
 # =====================================================================
 # --- CONEXÃO SQL (st.connection) ---
 # =====================================================================
 
-# Tenta inicializar a conexão SQL (configurada nos Segredos do Streamlit)
 try:
     conn = st.connection("db", type="sql")
     DB_TYPE = "sql"
 except Exception as e:
-    # Se falhar (ex: rodando localmente sem segredos), usa o SQLite local
     st.warning(f"Conexão SQL não configurada (Erro: {e}), usando banco de dados local (SQLite).")
     DB_NAME = "financeiro.db"
     DB_TYPE = "sqlite"
@@ -45,54 +48,37 @@ except Exception as e:
     def get_db_connection_sqlite():
         base_dir = os.path.dirname(os.path.abspath(__file__))
         db_path = os.path.join(base_dir, DB_NAME)
-        # check_same_thread=False é necessário para o SQLite com Streamlit
         return sqlite3.connect(db_path, check_same_thread=False)
 
-# O @st.cache_resource garante que isso rode só uma vez.
 @st.cache_resource
 def init_db():
-    """Cria as tabelas do banco de dados se elas não existirem."""
     if DB_TYPE == "sql":
         with conn.session as s:
             s.execute(text("""
             CREATE TABLE IF NOT EXISTS transacoes (
-                id SERIAL PRIMARY KEY,
-                Data DATE NOT NULL,
-                Categoria TEXT NOT NULL,
-                Descricao TEXT,
-                Valor REAL NOT NULL,
-                Cartao TEXT DEFAULT 'N/A'
-            )
-            """))
+                id SERIAL PRIMARY KEY, Data DATE NOT NULL, Categoria TEXT NOT NULL,
+                Descricao TEXT, Valor REAL NOT NULL, Cartao TEXT DEFAULT 'N/A'
+            )"""))
             s.execute(text("""
             CREATE TABLE IF NOT EXISTS faturas (
-                id SERIAL PRIMARY KEY,
-                Cartao TEXT NOT NULL,
-                MesAno TEXT NOT NULL,
-                ValorFatura REAL NOT NULL
-            )
-            """))
+                id SERIAL PRIMARY KEY, Cartao TEXT NOT NULL, MesAno TEXT NOT NULL, ValorFatura REAL NOT NULL
+            )"""))
             s.execute(text("""
-            CREATE TABLE IF NOT EXISTS orcamentos (
-                Categoria TEXT PRIMARY KEY,
-                Valor REAL NOT NULL
-            )
+            CREATE TABLE IF NOT EXISTS orcamentos ( Categoria TEXT PRIMARY KEY, Valor REAL NOT NULL )
             """))
             s.commit()
-    else: # Fallback para SQLite
+    else: 
         db_conn = get_db_connection_sqlite()
         cursor = db_conn.cursor()
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS transacoes (
             id INTEGER PRIMARY KEY AUTOINCREMENT, Data TEXT NOT NULL, Categoria TEXT NOT NULL,
             Descricao TEXT, Valor REAL NOT NULL, Cartao TEXT DEFAULT 'N/A'
-        )
-        """)
+        )""")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS faturas (
             id INTEGER PRIMARY KEY AUTOINCREMENT, Cartao TEXT NOT NULL, MesAno TEXT NOT NULL, ValorFatura REAL NOT NULL
-        )
-        """)
+        )""")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS orcamentos ( Categoria TEXT PRIMARY KEY, Valor REAL NOT NULL )
         """)
@@ -119,15 +105,23 @@ def save_transaction(data, categoria, descricao, valor, cartao):
         db_conn.close()
     st.cache_data.clear()
 
+# --- FUNÇÕES DE LOAD CORRIGIDAS ---
+
 def load_transactions(start_date, end_date):
+    query = "SELECT * FROM transacoes WHERE Data BETWEEN :start AND :end ORDER BY Data DESC"
     if DB_TYPE == "sql":
-        query = "SELECT * FROM transacoes WHERE Data BETWEEN :start AND :end ORDER BY Data DESC"
         df = conn.query(query, params=dict(start=start_date, end=end_date), ttl=60)
     else:
         query_sqlite = "SELECT * FROM transacoes WHERE Data BETWEEN ? AND ? ORDER BY Data DESC"
         db_conn = get_db_connection_sqlite()
         df = pd.read_sql_query(query_sqlite, db_conn, params=(start_date, end_date))
         db_conn.close()
+    
+    # --- CORREÇÃO DO KEYERROR ---
+    if df.empty:
+        return pd.DataFrame(columns=COLUNAS_TRANSACOES)
+    # --- FIM DA CORREÇÃO ---
+
     if not df.empty:
         df['Data'] = pd.to_datetime(df['Data'])
     return df
@@ -140,6 +134,12 @@ def load_all_transactions():
         db_conn = get_db_connection_sqlite()
         df = pd.read_sql_query(query, db_conn)
         db_conn.close()
+
+    # --- CORREÇÃO DO KEYERROR ---
+    if df.empty:
+        return pd.DataFrame(columns=COLUNAS_TRANSACOES)
+    # --- FIM DA CORREÇÃO ---
+
     if not df.empty:
         df['Data'] = pd.to_datetime(df['Data'])
     return df
@@ -208,6 +208,11 @@ def load_faturas():
         db_conn = get_db_connection_sqlite()
         df = pd.read_sql_query(query, db_conn)
         db_conn.close()
+    
+    # --- CORREÇÃO DO KEYERROR ---
+    if df.empty:
+        return pd.DataFrame(columns=COLUNAS_FATURAS)
+    # --- FIM DA CORREÇÃO ---
     return df
 
 # --- Funções CRUD (Orçamentos) ---
@@ -241,6 +246,11 @@ def load_budgets():
         db_conn = get_db_connection_sqlite()
         df = pd.read_sql_query(query, db_conn)
         db_conn.close()
+    
+    # --- CORREÇÃO DO KEYERROR ---
+    if df.empty:
+        return pd.DataFrame(columns=COLUNAS_ORCAMENTOS)
+    # --- FIM DA CORREÇÃO ---
     return df
 
 # --- Inicializa o DB ---
@@ -333,7 +343,7 @@ with tab_dash:
         tab_receita, tab_despesa = st.tabs([" Receita ", " Despesa "])
 
         with tab_receita:
-            with st.form("form_receita_main", clear_on_submit=True):
+            with st.form("form_receita_main", clear_on_submit=True): # Key alterada para ser única
                 st.markdown("### Nova Receita")
                 data_receita = st.date_input("Data", datetime.now(), key="data_rec_main")
                 categoria_receita = st.selectbox("Categoria", CATEGORIAS_RECEITA, key="cat_rec_main")
@@ -353,7 +363,7 @@ with tab_dash:
                     st.rerun()
 
         with tab_despesa:
-            with st.form("form_despesa_main", clear_on_submit=True):
+            with st.form("form_despesa_main", clear_on_submit=True): # Key alterada para ser única
                 st.markdown("### Nova Despesa")
                 data_despesa = st.date_input("Data", datetime.now(), key="data_des_main")
                 categoria_despesa = st.selectbox("Categoria", CATEGORIAS_DESPESA, key="cat_des_main")
@@ -521,13 +531,12 @@ with tab_dash:
         if df_transacoes.empty:
             st.info("Nenhuma transação cadastrada no período.")
         else:
-            # df_display_table é usado para a tabela e para format_option
             df_display_table = df_transacoes.copy()
             df_display_table['Data'] = df_display_table['Data'].dt.strftime('%d/%m/%Y')
             df_display_table = df_display_table[['id', 'Data', 'Categoria', 'Descricao', 'Valor', 'Cartao']]
             
             st.dataframe(
-                df_display_table.set_index('id'), # Mostra sem o índice 'id'
+                df_display_table.set_index('id'), 
                 use_container_width=True
             )
             
@@ -535,13 +544,12 @@ with tab_dash:
             
             def format_option(id):
                 try:
-                    # Procura o ID na coluna 'id' do dataframe
                     row = df_display_table[df_display_table['id'] == id].iloc[0]
                     return f"ID: {id} | {row['Data']} | {row['Descricao']} (R$ {row['Valor']:.2f})"
                 except IndexError:
                     return "Selecione..."
             
-            id_list = df_display_table['id'].tolist() # Pega a lista de IDs reais
+            id_list = df_display_table['id'].tolist()
 
             tab_excluir, tab_alterar = st.tabs([" Excluir Transação 🗑️", " Alterar Transação ✏️"])
 
@@ -575,13 +583,11 @@ with tab_dash:
                     )
                     
                     if id_para_alterar:
-                        # --- CORREÇÃO DO INDEXERROR ESTÁ AQUI ---
-                        # Busca no df_transacoes (que tem a coluna 'id') em vez do índice
+                        # CORREÇÃO DO INDEXERROR FEITA AQUI
                         row_data_list = df_transacoes[df_transacoes['id'] == id_para_alterar]
                         
                         if not row_data_list.empty:
                             row_data = row_data_list.iloc[0]
-                            
                             default_date = row_data['Data'].date()
                             default_valor = row_data['Valor']
                             default_descricao = row_data['Descricao']
