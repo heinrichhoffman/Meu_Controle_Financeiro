@@ -105,11 +105,9 @@ def save_transaction(data, categoria, descricao, valor, cartao):
         db_conn.close()
     st.cache_data.clear()
 
-# --- FUNÇÕES DE LOAD CORRIGIDAS ---
-
 def load_transactions(start_date, end_date):
-    query = "SELECT * FROM transacoes WHERE Data BETWEEN :start AND :end ORDER BY Data DESC"
     if DB_TYPE == "sql":
+        query = "SELECT * FROM transacoes WHERE Data BETWEEN :start AND :end ORDER BY Data DESC"
         df = conn.query(query, params=dict(start=start_date, end=end_date), ttl=60)
     else:
         query_sqlite = "SELECT * FROM transacoes WHERE Data BETWEEN ? AND ? ORDER BY Data DESC"
@@ -117,10 +115,8 @@ def load_transactions(start_date, end_date):
         df = pd.read_sql_query(query_sqlite, db_conn, params=(start_date, end_date))
         db_conn.close()
     
-    # --- CORREÇÃO DO KEYERROR ---
     if df.empty:
         return pd.DataFrame(columns=COLUNAS_TRANSACOES)
-    # --- FIM DA CORREÇÃO ---
 
     if not df.empty:
         df['Data'] = pd.to_datetime(df['Data'])
@@ -135,10 +131,8 @@ def load_all_transactions():
         df = pd.read_sql_query(query, db_conn)
         db_conn.close()
 
-    # --- CORREÇÃO DO KEYERROR ---
     if df.empty:
         return pd.DataFrame(columns=COLUNAS_TRANSACOES)
-    # --- FIM DA CORREÇÃO ---
 
     if not df.empty:
         df['Data'] = pd.to_datetime(df['Data'])
@@ -209,10 +203,8 @@ def load_faturas():
         df = pd.read_sql_query(query, db_conn)
         db_conn.close()
     
-    # --- CORREÇÃO DO KEYERROR ---
     if df.empty:
         return pd.DataFrame(columns=COLUNAS_FATURAS)
-    # --- FIM DA CORREÇÃO ---
     return df
 
 # --- Funções CRUD (Orçamentos) ---
@@ -247,16 +239,15 @@ def load_budgets():
         df = pd.read_sql_query(query, db_conn)
         db_conn.close()
     
-    # --- CORREÇÃO DO KEYERROR ---
     if df.empty:
         return pd.DataFrame(columns=COLUNAS_ORCAMENTOS)
-    # --- FIM DA CORREÇÃO ---
     return df
 
 # --- Inicializa o DB ---
 init_db()
 
-# --- CSS OTIMIZADO PARA MOBILE ---
+# --- CSS OTIMIZADO PARA MOBILE (Removido o CSS customizado dos KPIs) ---
+# (Mantemos apenas a otimização para mobile do flexbox, mas vamos simplificar)
 st.markdown("""
 <style>
 /* CSS para o container dos KPIs */
@@ -264,46 +255,25 @@ st.markdown("""
     display: flex;
     flex-wrap: wrap; 
     justify-content: space-around;
-    gap: 20px;
+    gap: 16px; /* Um espaço menor entre os cards */
 }
-/* CSS para os KPI Cards */
-.kpi-card {
-    background-color: #FFFFFF;
-    padding: 20px;
-    border-radius: 10px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    text-align: center;
+
+/* O st.metric nativo já é um card no tema claro, 
+   mas vamos garantir que ele se comporte bem no flex */
+.kpi-container > div {
     flex-grow: 1;
-    flex-shrink: 1;
     flex-basis: 250px;
     min-width: 250px;
-    max-width: 350px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    min-height: 130px;
 }
-.kpi-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: #5A5A5A;
-    margin-bottom: 8px;
-}
-.kpi-value {
-    font-size: 32px;
-    font-weight: 700;
-    color: #262730;
-}
-.kpi-value-positive { color: #28a745; }
-.kpi-value-negative { color: #dc3545; }
 
+/* Media Query para Telas Pequenas (Celulares) */
 @media (max-width: 768px) {
-    .kpi-card {
-        flex-basis: 100%;
-        min-height: 110px;
+    .kpi-container {
+        gap: 10px;
     }
-    .kpi-value { font-size: 28px; }
-    .kpi-title { font-size: 15px; }
+    .kpi-container > div {
+        flex-basis: 100%; /* Ocupa 100% no mobile */
+    }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -338,12 +308,12 @@ tab_dash, tab_cartoes, tab_orcamento = st.tabs([
 with tab_dash:
     today_dash = datetime.now() 
 
-    # --- CORREÇÃO MOBILE: Formulários movidos da Sidebar para o Expander ---
+    # --- Formulários movidos para o Expander ---
     with st.expander("Adicionar Transação ✍️", expanded=False):
         tab_receita, tab_despesa = st.tabs([" Receita ", " Despesa "])
 
         with tab_receita:
-            with st.form("form_receita_main", clear_on_submit=True): # Key alterada para ser única
+            with st.form("form_receita_main", clear_on_submit=True):
                 st.markdown("### Nova Receita")
                 data_receita = st.date_input("Data", datetime.now(), key="data_rec_main")
                 categoria_receita = st.selectbox("Categoria", CATEGORIAS_RECEITA, key="cat_rec_main")
@@ -363,7 +333,7 @@ with tab_dash:
                     st.rerun()
 
         with tab_despesa:
-            with st.form("form_despesa_main", clear_on_submit=True): # Key alterada para ser única
+            with st.form("form_despesa_main", clear_on_submit=True):
                 st.markdown("### Nova Despesa")
                 data_despesa = st.date_input("Data", datetime.now(), key="data_des_main")
                 categoria_despesa = st.selectbox("Categoria", CATEGORIAS_DESPESA, key="cat_des_main")
@@ -418,24 +388,18 @@ with tab_dash:
     else:
         receita = despesa = saldo = 0.0
 
-    saldo_color_class = "kpi-value-positive" if saldo >= 0 else "kpi-value-negative"
-
-    st.markdown(f"""
-    <div class="kpi-container">
-        <div class="kpi-card">
-            <div class="kpi-title">Receita Total 🟢</div>
-            <div class="kpi-value kpi-value-positive">R$ {receita:,.2f}</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-title">Despesa Total 🔴</div>
-            <div class="kpi-value kpi-value-negative">R$ {despesa:,.2f}</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-title">Saldo 🔵</div>
-            <div class="kpi-value {saldo_color_class}">R$ {saldo:,.2f}</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # --- MUDANÇA: USANDO st.metric EM VEZ DE HTML ---
+    # Envolvemos em um container de CSS para o layout flexível
+    st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric(label="Receita Total 🟢", value=f"R$ {receita:,.2f}")
+    with col2:
+        st.metric(label="Despesa Total 🔴", value=f"R$ {despesa:,.2f}")
+    with col3:
+        st.metric(label="Saldo 🔵", value=f"R$ {saldo:,.2f}")
+    st.markdown('</div>', unsafe_allow_html=True)
+    # --- FIM DA MUDANÇA ---
     
     st.markdown("<br/>", unsafe_allow_html=True) 
 
@@ -458,7 +422,7 @@ with tab_dash:
                 fig_pizza_desp = px.pie(
                     df_agrupado_desp, names='Categoria', values='Valor', hole=0.3
                 )
-                fig_pizza_desp.update_layout(template="plotly_dark") 
+                # MUDANÇA: Removido template="plotly_dark"
                 fig_pizza_desp.update_traces(textposition='inside', textinfo='percent+label')
                 st.plotly_chart(fig_pizza_desp, use_container_width=True)
 
@@ -473,7 +437,7 @@ with tab_dash:
                 fig_pizza_rec = px.pie(
                     df_agrupado_rec, names='Categoria', values='Valor', hole=0.3
                 )
-                fig_pizza_rec.update_layout(template="plotly_dark")
+                # MUDANÇA: Removido template="plotly_dark"
                 fig_pizza_rec.update_traces(textposition='inside', textinfo='percent+label')
                 st.plotly_chart(fig_pizza_rec, use_container_width=True)
 
@@ -519,7 +483,7 @@ with tab_dash:
                 title="Receitas vs Despesas por Mês",
                 color_discrete_map={'Receita': '#28a745', 'Despesa': '#dc3545'}
             )
-            fig_evolucao.update_layout(template="plotly_dark")
+            # MUDANÇA: Removido template="plotly_dark"
             st.plotly_chart(fig_evolucao, use_container_width=True)
 
     st.markdown("<br/>", unsafe_allow_html=True)
@@ -583,7 +547,6 @@ with tab_dash:
                     )
                     
                     if id_para_alterar:
-                        # CORREÇÃO DO INDEXERROR FEITA AQUI
                         row_data_list = df_transacoes[df_transacoes['id'] == id_para_alterar]
                         
                         if not row_data_list.empty:
@@ -697,7 +660,7 @@ with tab_cartoes:
                 x="MesAno", y="ValorFatura", color="Cartao",
                 barmode="group", title="Valor Mensal das Faturas por Cartão"
             )
-            fig_barras.update_layout(template="plotly_dark")
+            # MUDANÇA: Removido template="plotly_dark"
             st.plotly_chart(fig_barras, use_container_width=True)
 
     st.markdown("<br/>", unsafe_allow_html=True)

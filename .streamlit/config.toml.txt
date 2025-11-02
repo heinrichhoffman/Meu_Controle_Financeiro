@@ -1,6 +1,18 @@
+# Arquivo: .streamlit/config.toml
+
 [theme]
+
+# Seu "Azul Aço" como cor de destaque, fica ótimo no tema claro
 primaryColor="#4682B4"
-backgroundColor="#0E1117"
-secondaryBackgroundColor="#262730"
-textColor="#FAFAFA"
+
+# Fundo principal cinza bem claro (como o site da Embratur)
+backgroundColor="#F0F2F6"
+
+# Fundo dos "cards" e da sidebar (branco puro)
+secondaryBackgroundColor="#FFFFFF"
+
+# Cor do texto (preto suave)
+textColor="#262730"
+
+# Fonte padrão
 font="sans serif"
