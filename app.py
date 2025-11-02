@@ -1,21 +1,20 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import sqlite3
+import sqlite3 # Importado para o fallback local
 from datetime import datetime
 import os
+from sqlalchemy.sql import text # Importante para executar SQL
 
 # --- Configuração da Página ---
 st.set_page_config(
     page_title="Meu Controle Financeiro",
     page_icon="💵", 
     layout="wide",
-    initial_sidebar_state="auto" 
+    initial_sidebar_state="auto"  # Otimização para Mobile
 )
 
 # --- Constantes ---
-DB_NAME = "financeiro.db"
-
 CATEGORIAS_RECEITA = [
     "Salário", "Freelance", "Investimentos", "Presente", "Conta Corrente", 
     "Caju", "Outros"
@@ -30,122 +29,218 @@ CARTOES = [
 ]
 
 # =====================================================================
-# --- BANCO DE DADOS (SQLITE) ---
+# --- CONEXÃO SQL (st.connection) ---
 # =====================================================================
 
-def get_db_connection():
-    # Garante que o DB seja criado na mesma pasta do script
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    db_path = os.path.join(base_dir, DB_NAME)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+# Tenta inicializar a conexão SQL (configurada nos Segredos do Streamlit)
+try:
+    conn = st.connection("db", type="sql")
+    DB_TYPE = "sql"
+except Exception as e:
+    # Se falhar (ex: rodando localmente sem segredos), usa o SQLite local
+    st.warning(f"Conexão SQL não configurada (Erro: {e}), usando banco de dados local (SQLite).")
+    DB_NAME = "financeiro.db"
+    DB_TYPE = "sqlite"
 
+    def get_db_connection_sqlite():
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        db_path = os.path.join(base_dir, DB_NAME)
+        # check_same_thread=False é necessário para o SQLite com Streamlit
+        return sqlite3.connect(db_path, check_same_thread=False)
+
+# O @st.cache_resource garante que isso rode só uma vez.
+@st.cache_resource
 def init_db():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS transacoes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        Data TEXT NOT NULL,
-        Categoria TEXT NOT NULL,
-        Descricao TEXT,
-        Valor REAL NOT NULL,
-        Cartao TEXT DEFAULT 'N/A'
-    )
-    """)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS faturas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        Cartao TEXT NOT NULL,
-        MesAno TEXT NOT NULL,
-        ValorFatura REAL NOT NULL
-    )
-    """)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS orcamentos (
-        Categoria TEXT PRIMARY KEY,
-        Valor REAL NOT NULL
-    )
-    """)
-    conn.commit()
-    conn.close()
+    """Cria as tabelas do banco de dados se elas não existirem."""
+    if DB_TYPE == "sql":
+        with conn.session as s:
+            s.execute(text("""
+            CREATE TABLE IF NOT EXISTS transacoes (
+                id SERIAL PRIMARY KEY,
+                Data DATE NOT NULL,
+                Categoria TEXT NOT NULL,
+                Descricao TEXT,
+                Valor REAL NOT NULL,
+                Cartao TEXT DEFAULT 'N/A'
+            )
+            """))
+            s.execute(text("""
+            CREATE TABLE IF NOT EXISTS faturas (
+                id SERIAL PRIMARY KEY,
+                Cartao TEXT NOT NULL,
+                MesAno TEXT NOT NULL,
+                ValorFatura REAL NOT NULL
+            )
+            """))
+            s.execute(text("""
+            CREATE TABLE IF NOT EXISTS orcamentos (
+                Categoria TEXT PRIMARY KEY,
+                Valor REAL NOT NULL
+            )
+            """))
+            s.commit()
+    else: # Fallback para SQLite
+        db_conn = get_db_connection_sqlite()
+        cursor = db_conn.cursor()
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS transacoes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, Data TEXT NOT NULL, Categoria TEXT NOT NULL,
+            Descricao TEXT, Valor REAL NOT NULL, Cartao TEXT DEFAULT 'N/A'
+        )
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS faturas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, Cartao TEXT NOT NULL, MesAno TEXT NOT NULL, ValorFatura REAL NOT NULL
+        )
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS orcamentos ( Categoria TEXT PRIMARY KEY, Valor REAL NOT NULL )
+        """)
+        db_conn.commit()
+        db_conn.close()
 
 # --- Funções CRUD (Transações) ---
 def save_transaction(data, categoria, descricao, valor, cartao):
-    conn = get_db_connection()
-    conn.execute(
-        "INSERT INTO transacoes (Data, Categoria, Descricao, Valor, Cartao) VALUES (?, ?, ?, ?, ?)",
-        (data, categoria, descricao, valor, cartao)
-    )
-    conn.commit()
-    conn.close()
+    if DB_TYPE == "sql":
+        with conn.session as s:
+            s.execute(
+                text("INSERT INTO transacoes (Data, Categoria, Descricao, Valor, Cartao) VALUES (:data, :cat, :desc, :val, :cart)"),
+                params=dict(data=data, cat=categoria, desc=descricao, val=valor, cart=cartao)
+            )
+            s.commit()
+    else:
+        db_conn = get_db_connection_sqlite()
+        cursor = db_conn.cursor()
+        cursor.execute(
+            "INSERT INTO transacoes (Data, Categoria, Descricao, Valor, Cartao) VALUES (?, ?, ?, ?, ?)",
+            (data, categoria, descricao, valor, cartao)
+        )
+        db_conn.commit()
+        db_conn.close()
+    st.cache_data.clear()
 
 def load_transactions(start_date, end_date):
-    conn = get_db_connection()
-    query = "SELECT * FROM transacoes WHERE Data BETWEEN ? AND ? ORDER BY Data DESC"
-    df = pd.read_sql_query(query, conn, params=(start_date, end_date))
-    conn.close()
+    if DB_TYPE == "sql":
+        query = "SELECT * FROM transacoes WHERE Data BETWEEN :start AND :end ORDER BY Data DESC"
+        df = conn.query(query, params=dict(start=start_date, end=end_date), ttl=60)
+    else:
+        query_sqlite = "SELECT * FROM transacoes WHERE Data BETWEEN ? AND ? ORDER BY Data DESC"
+        db_conn = get_db_connection_sqlite()
+        df = pd.read_sql_query(query_sqlite, db_conn, params=(start_date, end_date))
+        db_conn.close()
     if not df.empty:
         df['Data'] = pd.to_datetime(df['Data'])
     return df
 
 def load_all_transactions():
-    conn = get_db_connection()
     query = "SELECT * FROM transacoes ORDER BY Data DESC"
-    df = pd.read_sql_query(query, conn)
-    conn.close()
+    if DB_TYPE == "sql":
+        df = conn.query(query, ttl=60)
+    else:
+        db_conn = get_db_connection_sqlite()
+        df = pd.read_sql_query(query, db_conn)
+        db_conn.close()
     if not df.empty:
         df['Data'] = pd.to_datetime(df['Data'])
     return df
 
 def delete_transaction(id):
-    conn = get_db_connection()
-    conn.execute("DELETE FROM transacoes WHERE id = ?", (id,))
-    conn.commit()
-    conn.close()
+    if DB_TYPE == "sql":
+        with conn.session as s:
+            s.execute(text("DELETE FROM transacoes WHERE id = :id"), params=dict(id=id))
+            s.commit()
+    else:
+        db_conn = get_db_connection_sqlite()
+        cursor = db_conn.cursor()
+        cursor.execute("DELETE FROM transacoes WHERE id = ?", (id,))
+        db_conn.commit()
+        db_conn.close()
+    st.cache_data.clear()
 
 def update_transaction(id, data, categoria, descricao, valor, cartao):
-    conn = get_db_connection()
-    conn.execute(
-        """UPDATE transacoes 
-           SET Data = ?, Categoria = ?, Descricao = ?, Valor = ?, Cartao = ?
-           WHERE id = ?""",
-        (data, categoria, descricao, valor, cartao, id)
-    )
-    conn.commit()
-    conn.close()
+    if DB_TYPE == "sql":
+        with conn.session as s:
+            s.execute(
+                text("""UPDATE transacoes 
+                       SET Data = :data, Categoria = :cat, Descricao = :desc, Valor = :val, Cartao = :cart
+                       WHERE id = :id"""),
+                params=dict(data=data, cat=categoria, desc=descricao, val=valor, cart=cartao, id=id)
+            )
+            s.commit()
+    else:
+        db_conn = get_db_connection_sqlite()
+        cursor = db_conn.cursor()
+        cursor.execute(
+            """UPDATE transacoes 
+               SET Data = ?, Categoria = ?, Descricao = ?, Valor = ?, Cartao = ?
+               WHERE id = ?""",
+            (data, categoria, descricao, valor, cartao, id)
+        )
+        db_conn.commit()
+        db_conn.close()
+    st.cache_data.clear()
 
 # --- Funções CRUD (Faturas) ---
 def save_fatura(cartao, mes_ano, valor):
-    conn = get_db_connection()
-    conn.execute(
-        "INSERT INTO faturas (Cartao, MesAno, ValorFatura) VALUES (?, ?, ?)",
-        (cartao, mes_ano, valor)
-    )
-    conn.commit()
-    conn.close()
+    if DB_TYPE == "sql":
+        with conn.session as s:
+            s.execute(
+                text("INSERT INTO faturas (Cartao, MesAno, ValorFatura) VALUES (:cart, :mes, :val)"),
+                params=dict(cart=cartao, mes=mes_ano, val=valor)
+            )
+            s.commit()
+    else:
+        db_conn = get_db_connection_sqlite()
+        cursor = db_conn.cursor()
+        cursor.execute(
+            "INSERT INTO faturas (Cartao, MesAno, ValorFatura) VALUES (?, ?, ?)",
+            (cartao, mes_ano, valor)
+        )
+        db_conn.commit()
+        db_conn.close()
+    st.cache_data.clear()
 
 def load_faturas():
-    conn = get_db_connection()
-    df = pd.read_sql_query("SELECT * FROM faturas ORDER BY MesAno", conn)
-    conn.close()
+    query = "SELECT * FROM faturas ORDER BY MesAno"
+    if DB_TYPE == "sql":
+        df = conn.query(query, ttl=60)
+    else:
+        db_conn = get_db_connection_sqlite()
+        df = pd.read_sql_query(query, db_conn)
+        db_conn.close()
     return df
 
 # --- Funções CRUD (Orçamentos) ---
 def save_budget(categoria, valor):
-    conn = get_db_connection()
-    conn.execute(
-        "INSERT OR REPLACE INTO orcamentos (Categoria, Valor) VALUES (?, ?)",
-        (categoria, valor)
-    )
-    conn.commit()
-    conn.close()
+    if DB_TYPE == "sql":
+        with conn.session as s:
+            s.execute(
+                text("""
+                INSERT INTO orcamentos (Categoria, Valor) VALUES (:cat, :val)
+                ON CONFLICT (Categoria) DO UPDATE SET Valor = :val
+                """),
+                params=dict(cat=categoria, val=valor)
+            )
+            s.commit()
+    else:
+        db_conn = get_db_connection_sqlite()
+        cursor = db_conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO orcamentos (Categoria, Valor) VALUES (?, ?)",
+            (categoria, valor)
+        )
+        db_conn.commit()
+        db_conn.close()
+    st.cache_data.clear()
 
 def load_budgets():
-    conn = get_db_connection()
-    df = pd.read_sql_query("SELECT * FROM orcamentos", conn)
-    conn.close()
+    query = "SELECT * FROM orcamentos"
+    if DB_TYPE == "sql":
+        df = conn.query(query, ttl=60)
+    else:
+        db_conn = get_db_connection_sqlite()
+        df = pd.read_sql_query(query, db_conn)
+        db_conn.close()
     return df
 
 # --- Inicializa o DB ---
@@ -233,12 +328,12 @@ tab_dash, tab_cartoes, tab_orcamento = st.tabs([
 with tab_dash:
     today_dash = datetime.now() 
 
-    # --- NOVO LOCAL PARA ADICIONAR TRANSAÇÃO ---
+    # --- CORREÇÃO MOBILE: Formulários movidos da Sidebar para o Expander ---
     with st.expander("Adicionar Transação ✍️", expanded=False):
         tab_receita, tab_despesa = st.tabs([" Receita ", " Despesa "])
 
         with tab_receita:
-            with st.form("form_receita_main", clear_on_submit=True): # Key alterada para ser única
+            with st.form("form_receita_main", clear_on_submit=True):
                 st.markdown("### Nova Receita")
                 data_receita = st.date_input("Data", datetime.now(), key="data_rec_main")
                 categoria_receita = st.selectbox("Categoria", CATEGORIAS_RECEITA, key="cat_rec_main")
@@ -258,7 +353,7 @@ with tab_dash:
                     st.rerun()
 
         with tab_despesa:
-            with st.form("form_despesa_main", clear_on_submit=True): # Key alterada para ser única
+            with st.form("form_despesa_main", clear_on_submit=True):
                 st.markdown("### Nova Despesa")
                 data_despesa = st.date_input("Data", datetime.now(), key="data_des_main")
                 categoria_despesa = st.selectbox("Categoria", CATEGORIAS_DESPESA, key="cat_des_main")
@@ -426,7 +521,7 @@ with tab_dash:
         if df_transacoes.empty:
             st.info("Nenhuma transação cadastrada no período.")
         else:
-            # Precisamos do df_display COM o 'id' como coluna normal para o filtro
+            # df_display_table é usado para a tabela e para format_option
             df_display_table = df_transacoes.copy()
             df_display_table['Data'] = df_display_table['Data'].dt.strftime('%d/%m/%Y')
             df_display_table = df_display_table[['id', 'Data', 'Categoria', 'Descricao', 'Valor', 'Cartao']]
@@ -438,15 +533,15 @@ with tab_dash:
             
             st.markdown("#### Gerenciar Lançamentos")
             
-            # Usamos o df_display_table (com 'id' como coluna) para criar as opções
             def format_option(id):
                 try:
+                    # Procura o ID na coluna 'id' do dataframe
                     row = df_display_table[df_display_table['id'] == id].iloc[0]
                     return f"ID: {id} | {row['Data']} | {row['Descricao']} (R$ {row['Valor']:.2f})"
                 except IndexError:
                     return "Selecione..."
             
-            id_list = df_display_table['id'].tolist()
+            id_list = df_display_table['id'].tolist() # Pega a lista de IDs reais
 
             tab_excluir, tab_alterar = st.tabs([" Excluir Transação 🗑️", " Alterar Transação ✏️"])
 
@@ -480,54 +575,55 @@ with tab_dash:
                     )
                     
                     if id_para_alterar:
-                        
-                        # --- LINHA CORRIGIDA ---
+                        # --- CORREÇÃO DO INDEXERROR ESTÁ AQUI ---
                         # Busca no df_transacoes (que tem a coluna 'id') em vez do índice
-                        row_data = df_transacoes[df_transacoes['id'] == id_para_alterar].iloc[0]
-                        # --- FIM DA CORREÇÃO ---
+                        row_data_list = df_transacoes[df_transacoes['id'] == id_para_alterar]
                         
-                        default_date = row_data['Data'].date()
-                        default_valor = row_data['Valor']
-                        default_descricao = row_data['Descricao']
-                        default_cartao = row_data['Cartao']
-                        default_categoria = row_data['Categoria']
-                        is_receita = default_valor > 0
-                        
-                        with st.form("form_alterar"):
-                            st.subheader(f"Alterando Transação ID: {id_para_alterar}")
+                        if not row_data_list.empty:
+                            row_data = row_data_list.iloc[0]
                             
-                            novo_data = st.date_input("Data", value=default_date, key="edit_data")
-                            novo_descricao = st.text_input("Descrição", value=default_descricao, key="edit_desc")
+                            default_date = row_data['Data'].date()
+                            default_valor = row_data['Valor']
+                            default_descricao = row_data['Descricao']
+                            default_cartao = row_data['Cartao']
+                            default_categoria = row_data['Categoria']
+                            is_receita = default_valor > 0
                             
-                            if is_receita:
-                                try: default_cat_index = CATEGORIAS_RECEITA.index(default_categoria)
-                                except ValueError: default_cat_index = 0
-                                novo_categoria = st.selectbox("Categoria", CATEGORIAS_RECEITA, index=default_cat_index, key="edit_cat_rec")
-                                novo_valor = st.number_input("Valor (R$)", min_value=0.01, value=default_valor, format="%.2f", key="edit_val_rec")
-                                novo_cartao = "N/A"
-                            
-                            else: # É Despesa
-                                try: default_cat_index = CATEGORIAS_DESPESA.index(default_categoria)
-                                except ValueError: default_cat_index = 0
-                                novo_categoria = st.selectbox("Categoria", CATEGORIAS_DESPESA, index=default_cat_index, key="edit_cat_des")
+                            with st.form("form_alterar"):
+                                st.subheader(f"Alterando Transação ID: {id_para_alterar}")
                                 
-                                try: default_cartao_index = CARTOES.index(default_cartao)
-                                except ValueError: default_cartao_index = 0
-                                novo_cartao = st.selectbox("Cartão", CARTOES, index=default_cartao_index, key="edit_cartao")
+                                novo_data = st.date_input("Data", value=default_date, key="edit_data")
+                                novo_descricao = st.text_input("Descrição", value=default_descricao, key="edit_desc")
                                 
-                                novo_valor = st.number_input("Valor (R$)", min_value=0.01, value=abs(default_valor), format="%.2f", key="edit_val_des")
-                            
-                            submit_alterar = st.form_submit_button("Salvar Alterações")
-                            
-                            if submit_alterar:
-                                if not is_receita: novo_valor = novo_valor * -1
+                                if is_receita:
+                                    try: default_cat_index = CATEGORIAS_RECEITA.index(default_categoria)
+                                    except ValueError: default_cat_index = 0
+                                    novo_categoria = st.selectbox("Categoria", CATEGORIAS_RECEITA, index=default_cat_index, key="edit_cat_rec")
+                                    novo_valor = st.number_input("Valor (R$)", min_value=0.01, value=default_valor, format="%.2f", key="edit_val_rec")
+                                    novo_cartao = "N/A"
+                                
+                                else: # É Despesa
+                                    try: default_cat_index = CATEGORIAS_DESPESA.index(default_categoria)
+                                    except ValueError: default_cat_index = 0
+                                    novo_categoria = st.selectbox("Categoria", CATEGORIAS_DESPESA, index=default_cat_index, key="edit_cat_des")
                                     
-                                update_transaction(
-                                    id_para_alterar, novo_data.strftime("%Y-%m-%d"),
-                                    novo_categoria, novo_descricao, novo_valor, novo_cartao
-                                )
-                                st.success("Transação alterada com sucesso!")
-                                st.rerun()
+                                    try: default_cartao_index = CARTOES.index(default_cartao)
+                                    except ValueError: default_cartao_index = 0
+                                    novo_cartao = st.selectbox("Cartão", CARTOES, index=default_cartao_index, key="edit_cartao")
+                                    
+                                    novo_valor = st.number_input("Valor (R$)", min_value=0.01, value=abs(default_valor), format="%.2f", key="edit_val_des")
+                                
+                                submit_alterar = st.form_submit_button("Salvar Alterações")
+                                
+                                if submit_alterar:
+                                    if not is_receita: novo_valor = novo_valor * -1
+                                        
+                                    update_transaction(
+                                        id_para_alterar, novo_data.strftime("%Y-%m-%d"),
+                                        novo_categoria, novo_descricao, novo_valor, novo_cartao
+                                    )
+                                    st.success("Transação alterada com sucesso!")
+                                    st.rerun()
 
 # =====================================================================
 # --- PÁGINA 2: CARTÕES DE CRÉDITO ---
