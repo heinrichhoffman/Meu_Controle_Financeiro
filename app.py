@@ -51,41 +51,47 @@ except Exception as e:
 
 @st.cache_resource
 def init_db():
-    if DB_TYPE == "sql":
-        with conn.session as s:
-            s.execute(text("""
+    """Cria as tabelas do banco de dados se elas não existirem."""
+    try:
+        if DB_TYPE == "sql":
+            with conn.session as s:
+                s.execute(text("""
+                CREATE TABLE IF NOT EXISTS transacoes (
+                    id SERIAL PRIMARY KEY, Data DATE NOT NULL, Categoria TEXT NOT NULL,
+                    Descricao TEXT, Valor REAL NOT NULL, Cartao TEXT DEFAULT 'N/A'
+                )"""))
+                s.execute(text("""
+                CREATE TABLE IF NOT EXISTS faturas (
+                    id SERIAL PRIMARY KEY, Cartao TEXT NOT NULL, MesAno TEXT NOT NULL, ValorFatura REAL NOT NULL
+                )"""))
+                s.execute(text("""
+                CREATE TABLE IF NOT EXISTS orcamentos ( Categoria TEXT PRIMARY KEY, Valor REAL NOT NULL )
+                """))
+                s.commit()
+        else: 
+            db_conn = get_db_connection_sqlite()
+            cursor = db_conn.cursor()
+            cursor.execute("""
             CREATE TABLE IF NOT EXISTS transacoes (
-                id SERIAL PRIMARY KEY, Data DATE NOT NULL, Categoria TEXT NOT NULL,
+                id INTEGER PRIMARY KEY AUTOINCREMENT, Data TEXT NOT NULL, Categoria TEXT NOT NULL,
                 Descricao TEXT, Valor REAL NOT NULL, Cartao TEXT DEFAULT 'N/A'
-            )"""))
-            s.execute(text("""
+            )""")
+            cursor.execute("""
             CREATE TABLE IF NOT EXISTS faturas (
-                id SERIAL PRIMARY KEY, Cartao TEXT NOT NULL, MesAno TEXT NOT NULL, ValorFatura REAL NOT NULL
-            )"""))
-            s.execute(text("""
+                id INTEGER PRIMARY KEY AUTOINCREMENT, Cartao TEXT NOT NULL, MesAno TEXT NOT NULL, ValorFatura REAL NOT NULL
+            )""")
+            cursor.execute("""
             CREATE TABLE IF NOT EXISTS orcamentos ( Categoria TEXT PRIMARY KEY, Valor REAL NOT NULL )
-            """))
-            s.commit()
-    else: 
-        db_conn = get_db_connection_sqlite()
-        cursor = db_conn.cursor()
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS transacoes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, Data TEXT NOT NULL, Categoria TEXT NOT NULL,
-            Descricao TEXT, Valor REAL NOT NULL, Cartao TEXT DEFAULT 'N/A'
-        )""")
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS faturas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, Cartao TEXT NOT NULL, MesAno TEXT NOT NULL, ValorFatura REAL NOT NULL
-        )""")
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS orcamentos ( Categoria TEXT PRIMARY KEY, Valor REAL NOT NULL )
-        """)
-        db_conn.commit()
-        db_conn.close()
+            """)
+            db_conn.commit()
+            db_conn.close()
+    except Exception as e:
+        st.error(f"Erro ao inicializar o banco de dados: {e}")
 
 # --- Funções CRUD (Transações) ---
 def save_transaction(data, categoria, descricao, valor, cartao):
+    # Esta função agora vai gerar um erro se a conexão falhar,
+    # que será capturado pelo try/except no formulário.
     if DB_TYPE == "sql":
         with conn.session as s:
             s.execute(
@@ -117,7 +123,7 @@ def load_transactions(start_date, end_date):
             df = pd.read_sql_query(query_sqlite, db_conn, params=(start_date, end_date))
             db_conn.close()
     except Exception as e:
-        st.error(f"Erro ao carregar transações: {e}")
+        # Se a tabela não existir (ex: primeiro deploy), não mostra erro, apenas retorna vazio
         return pd.DataFrame(columns=COLUNAS_TRANSACOES)
     
     if df.empty or 'Data' not in df.columns:
@@ -138,7 +144,6 @@ def load_all_transactions():
             df = pd.read_sql_query(query, db_conn)
             db_conn.close()
     except Exception as e:
-        st.error(f"Erro ao carregar todas as transações: {e}")
         return pd.DataFrame(columns=COLUNAS_TRANSACOES)
 
     if df.empty or 'Data' not in df.columns:
@@ -215,7 +220,6 @@ def load_faturas():
             df = pd.read_sql_query(query, db_conn)
             db_conn.close()
     except Exception as e:
-        st.error(f"Erro ao carregar faturas: {e}")
         return pd.DataFrame(columns=COLUNAS_FATURAS)
     
     if df.empty or 'MesAno' not in df.columns:
@@ -257,7 +261,6 @@ def load_budgets():
             df = pd.read_sql_query(query, db_conn)
             db_conn.close()
     except Exception as e:
-        st.error(f"Erro ao carregar orçamentos: {e}")
         return pd.DataFrame(columns=COLUNAS_ORCAMENTOS)
 
     if df.empty or 'Categoria' not in df.columns:
@@ -322,64 +325,12 @@ st.markdown("""
 
 # =====================================================================
 # --- BARRA LATERAL (SIDEBAR) ---
-# --- MUDANÇA: Formulários de volta para a Sidebar ---
 # =====================================================================
 st.sidebar.image("https://img.icons8.com/plasticine/100/000000/stack-of-money.png", width=100)
 st.sidebar.title("Controle Financeiro PRO")
 st.sidebar.markdown("---")
-st.sidebar.header("Adicionar Transação ✍️")
-tab_receita, tab_despesa = st.sidebar.tabs([" Receita ", " Despesa "])
-
-with tab_receita:
-    with st.form("form_receita_sidebar", clear_on_submit=True): # Key alterada
-        st.markdown("### Nova Receita")
-        data_receita = st.date_input("Data", datetime.now(), key="data_rec_sidebar")
-        categoria_receita = st.selectbox("Categoria", CATEGORIAS_RECEITA, key="cat_rec_sidebar")
-        descricao_receita = st.text_input("Descrição", key="desc_rec_sidebar")
-        valor_receita = st.number_input("Valor (R$)", min_value=0.01, format="%.2f", step=0.01, key="val_rec_sidebar")
-        
-        submit_receita = st.form_submit_button("Salvar Receita")
-        if submit_receita:
-            # --- MUDANÇA: Adicionado Try/Except ---
-            try:
-                save_transaction(
-                    data_receita.strftime("%Y-%m-%d"), 
-                    categoria_receita, 
-                    descricao_receita, 
-                    valor_receita, 
-                    "N/A"
-                )
-                st.sidebar.success("Receita salva com sucesso!")
-                st.rerun()
-            except Exception as e:
-                st.sidebar.error(f"Erro ao salvar: {e}")
-                st.sidebar.error("Verifique os Segredos (Secrets) do seu app no Streamlit Cloud.")
-
-with tab_despesa:
-    with st.form("form_despesa_sidebar", clear_on_submit=True): # Key alterada
-        st.markdown("### Nova Despesa")
-        data_despesa = st.date_input("Data", datetime.now(), key="data_des_sidebar")
-        categoria_despesa = st.selectbox("Categoria", CATEGORIAS_DESPESA, key="cat_des_sidebar")
-        cartao_despesa = st.selectbox("Cartão", CARTOES, key="cartao_des_sidebar")
-        descricao_despesa = st.text_input("Descrição", key="desc_des_sidebar")
-        valor_despesa = st.number_input("Valor (R$)", min_value=0.01, format="%.2f", step=0.01, key="val_des_sidebar")
-        
-        submit_despesa = st.form_submit_button("Salvar Despesa")
-        if submit_despesa:
-            # --- MUDANÇA: Adicionado Try/Except ---
-            try:
-                save_transaction(
-                    data_despesa.strftime("%Y-%m-%d"), 
-                    categoria_despesa, 
-                    descricao_despesa, 
-                    valor_despesa * -1,
-                    cartao_despesa
-                )
-                st.sidebar.success("Despesa salva com sucesso!")
-                st.rerun()
-            except Exception as e:
-                st.sidebar.error(f"Erro ao salvar: {e}")
-                st.sidebar.error("Verifique os Segredos (Secrets) do seu app no Streamlit Cloud.")
+st.sidebar.header("Navegação 🧭")
+st.sidebar.info("Use as abas no topo da página para navegar entre os dashboards.")
 
 
 # =====================================================================
@@ -401,7 +352,61 @@ tab_dash, tab_cartoes, tab_orcamento = st.tabs([
 with tab_dash:
     today_dash = datetime.now() 
 
-    # --- Formulários foram REMOVIDOS daqui ---
+    # --- Formulários movidos para o Expander ---
+    with st.expander("Adicionar Transação ✍️", expanded=False):
+        tab_receita, tab_despesa = st.tabs([" Receita ", " Despesa "])
+
+        with tab_receita:
+            with st.form("form_receita_main", clear_on_submit=True):
+                st.markdown("### Nova Receita")
+                data_receita = st.date_input("Data", datetime.now(), key="data_rec_main")
+                categoria_receita = st.selectbox("Categoria", CATEGORIAS_RECEITA, key="cat_rec_main")
+                descricao_receita = st.text_input("Descrição", key="desc_rec_main")
+                valor_receita = st.number_input("Valor (R$)", min_value=0.01, format="%.2f", step=0.01, key="val_rec_main")
+                
+                submit_receita = st.form_submit_button("Salvar Receita")
+                if submit_receita:
+                    # --- CORREÇÃO: Adicionado Try/Except ---
+                    try:
+                        save_transaction(
+                            data_receita.strftime("%Y-%m-%d"), 
+                            categoria_receita, 
+                            descricao_receita, 
+                            valor_receita, 
+                            "N/A"
+                        )
+                        st.success("Receita salva com sucesso!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao salvar: {e}")
+                        st.error("Verifique os 'Segredos' (Secrets) da sua conexão no Streamlit Cloud.")
+
+        with tab_despesa:
+            with st.form("form_despesa_main", clear_on_submit=True):
+                st.markdown("### Nova Despesa")
+                data_despesa = st.date_input("Data", datetime.now(), key="data_des_main")
+                categoria_despesa = st.selectbox("Categoria", CATEGORIAS_DESPESA, key="cat_des_main")
+                cartao_despesa = st.selectbox("Cartão", CARTOES, key="cartao_des_main")
+                descricao_despesa = st.text_input("Descrição", key="desc_des_main")
+                valor_despesa = st.number_input("Valor (R$)", min_value=0.01, format="%.2f", step=0.01, key="val_des_main")
+                
+                submit_despesa = st.form_submit_button("Salvar Despesa")
+                if submit_despesa:
+                    # --- CORREÇÃO: Adicionado Try/Except ---
+                    try:
+                        save_transaction(
+                            data_despesa.strftime("%Y-%m-%d"), 
+                            categoria_despesa, 
+                            descricao_despesa, 
+                            valor_despesa * -1,
+                            cartao_despesa
+                        )
+                        st.success("Despesa salva com sucesso!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao salvar: {e}")
+                        st.error("Verifique os 'Segredos' (Secrets) da sua conexão no Streamlit Cloud.")
+
     
     # --- 1. FILTROS DE DATA ---
     with st.container(border=True):
@@ -699,9 +704,12 @@ with tab_cartoes:
                     mes_num = MESES_MAP[mes_selecionado]
                     mes_ano = f"{ano_selecionado}-{mes_num}"
                     
-                    save_fatura(cartao_fatura, mes_ano, valor_fatura)
-                    st.success(f"Fatura de {cartao_fatura} ({mes_ano}) salva!")
-                    st.rerun()
+                    try:
+                        save_fatura(cartao_fatura, mes_ano, valor_fatura)
+                        st.success(f"Fatura de {cartao_fatura} ({mes_ano}) salva!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao salvar: {e}")
 
     st.markdown("<br/>", unsafe_allow_html=True)
 
@@ -764,9 +772,12 @@ with tab_orcamento:
             
             submit_orcamento = st.form_submit_button("Salvar Orçamento")
             if submit_orcamento:
-                save_budget(categoria, valor)
-                st.success(f"Orçamento para '{categoria}' salvo como R$ {valor:,.2f}")
-                st.rerun()
+                try:
+                    save_budget(categoria, valor)
+                    st.success(f"Orçamento para '{categoria}' salvo como R$ {valor:,.2f}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao salvar: {e}")
 
     st.markdown("<br/>", unsafe_allow_html=True)
 
@@ -833,4 +844,5 @@ with tab_orcamento:
                 else:
                     st.success(f"Gasto: R$ {row['Gasto (R$)']:,.2f} de R$ {row['Orçado (R$)']:,.2f}")
                     st.progress(row['Progresso'])
+
 
