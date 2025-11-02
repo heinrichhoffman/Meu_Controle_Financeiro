@@ -10,10 +10,10 @@ st.set_page_config(
     page_title="Meu Controle Financeiro",
     page_icon="💵", 
     layout="wide",
-    initial_sidebar_state="auto"  # <-- MUDANÇA PARA OTIMIZAÇÃO MOBILE
+    initial_sidebar_state="auto" 
 )
 
-# --- Constantes (Listas atualizadas com CAJU) ---
+# --- Constantes ---
 DB_NAME = "financeiro.db"
 
 CATEGORIAS_RECEITA = [
@@ -34,7 +34,10 @@ CARTOES = [
 # =====================================================================
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_NAME)
+    # Garante que o DB seja criado na mesma pasta do script
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    db_path = os.path.join(base_dir, DB_NAME)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -148,17 +151,16 @@ def load_budgets():
 # --- Inicializa o DB ---
 init_db()
 
-# --- NOVO CSS OTIMIZADO PARA MOBILE (Flexbox + Media Query) ---
+# --- CSS OTIMIZADO PARA MOBILE ---
 st.markdown("""
 <style>
 /* CSS para o container dos KPIs */
 .kpi-container {
     display: flex;
-    flex-wrap: wrap; /* <--- Permite que os cards "quebrem" para a linha de baixo */
+    flex-wrap: wrap; 
     justify-content: space-around;
-    gap: 20px; /* Espaço entre os cards */
+    gap: 20px;
 }
-
 /* CSS para os KPI Cards */
 .kpi-card {
     background-color: #FFFFFF;
@@ -166,15 +168,11 @@ st.markdown("""
     border-radius: 10px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     text-align: center;
-    
-    /* --- Mágica do Flexbox --- */
-    flex-grow: 1; /* Permite que o card cresça */
-    flex-shrink: 1; /* Permite que o card encolha */
-    flex-basis: 250px; /* Largura base de cada card. */
-    
-    min-width: 250px; /* Largura mínima antes de quebrar */
-    max-width: 350px; /* Largura máxima */
-    
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 250px;
+    min-width: 250px;
+    max-width: 350px;
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -194,18 +192,13 @@ st.markdown("""
 .kpi-value-positive { color: #28a745; }
 .kpi-value-negative { color: #dc3545; }
 
-/* --- Media Query para Telas Pequenas (Celulares) --- */
 @media (max-width: 768px) {
     .kpi-card {
-        flex-basis: 100%; /* Em celulares, cada card ocupa 100% da largura */
-        min-height: 110px; /* Altura menor no mobile */
+        flex-basis: 100%;
+        min-height: 110px;
     }
-    .kpi-value {
-        font-size: 28px; /* Fonte um pouco menor no mobile */
-    }
-    .kpi-title {
-        font-size: 15px;
-    }
+    .kpi-value { font-size: 28px; }
+    .kpi-title { font-size: 15px; }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -217,49 +210,9 @@ st.markdown("""
 st.sidebar.image("https://img.icons8.com/plasticine/100/000000/stack-of-money.png", width=100)
 st.sidebar.title("Controle Financeiro PRO")
 st.sidebar.markdown("---")
-st.sidebar.header("Adicionar Transação ✍️")
-tab_receita, tab_despesa = st.sidebar.tabs([" Receita ", " Despesa "])
+st.sidebar.header("Navegação 🧭")
+st.sidebar.info("Use as abas no topo da página para navegar entre os dashboards.")
 
-with tab_receita:
-    with st.form("form_receita", clear_on_submit=True):
-        st.markdown("### Nova Receita")
-        data_receita = st.date_input("Data", datetime.now(), key="data_rec")
-        categoria_receita = st.selectbox("Categoria", CATEGORIAS_RECEITA, key="cat_rec")
-        descricao_receita = st.text_input("Descrição", key="desc_rec")
-        valor_receita = st.number_input("Valor (R$)", min_value=0.01, format="%.2f", step=0.01, key="val_rec")
-        
-        submit_receita = st.form_submit_button("Salvar Receita")
-        if submit_receita:
-            save_transaction(
-                data_receita.strftime("%Y-%m-%d"), 
-                categoria_receita, 
-                descricao_receita, 
-                valor_receita, 
-                "N/A"
-            )
-            st.sidebar.success("Receita salva com sucesso!")
-            st.rerun()
-
-with tab_despesa:
-    with st.form("form_despesa", clear_on_submit=True):
-        st.markdown("### Nova Despesa")
-        data_despesa = st.date_input("Data", datetime.now(), key="data_des")
-        categoria_despesa = st.selectbox("Categoria", CATEGORIAS_DESPESA, key="cat_des")
-        cartao_despesa = st.selectbox("Cartão", CARTOES, key="cartao_des")
-        descricao_despesa = st.text_input("Descrição", key="desc_des")
-        valor_despesa = st.number_input("Valor (R$)", min_value=0.01, format="%.2f", step=0.01, key="val_des")
-        
-        submit_despesa = st.form_submit_button("Salvar Despesa")
-        if submit_despesa:
-            save_transaction(
-                data_despesa.strftime("%Y-%m-%d"), 
-                categoria_despesa, 
-                descricao_despesa, 
-                valor_despesa * -1,
-                cartao_despesa
-            )
-            st.sidebar.success("Despesa salva com sucesso!")
-            st.rerun()
 
 # =====================================================================
 # --- ÁREA PRINCIPAL COM ABAS ---
@@ -267,7 +220,6 @@ with tab_despesa:
 
 st.title("Meu Dashboard de Controle Financeiro")
 
-# --- ESTRUTURA DE NAVEGAÇÃO COM ABAS ---
 tab_dash, tab_cartoes, tab_orcamento = st.tabs([
     "Dashboard Principal 📈", 
     "Cartões de Crédito 💳", 
@@ -279,8 +231,53 @@ tab_dash, tab_cartoes, tab_orcamento = st.tabs([
 # --- PÁGINA 1: DASHBOARD PRINCIPAL ---
 # =====================================================================
 with tab_dash:
-    today_dash = datetime.now() # Variável 'today' local para esta aba
+    today_dash = datetime.now() 
 
+    # --- NOVO LOCAL PARA ADICIONAR TRANSAÇÃO ---
+    with st.expander("Adicionar Transação ✍️", expanded=False):
+        tab_receita, tab_despesa = st.tabs([" Receita ", " Despesa "])
+
+        with tab_receita:
+            with st.form("form_receita_main", clear_on_submit=True): # Key alterada para ser única
+                st.markdown("### Nova Receita")
+                data_receita = st.date_input("Data", datetime.now(), key="data_rec_main")
+                categoria_receita = st.selectbox("Categoria", CATEGORIAS_RECEITA, key="cat_rec_main")
+                descricao_receita = st.text_input("Descrição", key="desc_rec_main")
+                valor_receita = st.number_input("Valor (R$)", min_value=0.01, format="%.2f", step=0.01, key="val_rec_main")
+                
+                submit_receita = st.form_submit_button("Salvar Receita")
+                if submit_receita:
+                    save_transaction(
+                        data_receita.strftime("%Y-%m-%d"), 
+                        categoria_receita, 
+                        descricao_receita, 
+                        valor_receita, 
+                        "N/A"
+                    )
+                    st.success("Receita salva com sucesso!")
+                    st.rerun()
+
+        with tab_despesa:
+            with st.form("form_despesa_main", clear_on_submit=True): # Key alterada para ser única
+                st.markdown("### Nova Despesa")
+                data_despesa = st.date_input("Data", datetime.now(), key="data_des_main")
+                categoria_despesa = st.selectbox("Categoria", CATEGORIAS_DESPESA, key="cat_des_main")
+                cartao_despesa = st.selectbox("Cartão", CARTOES, key="cartao_des_main")
+                descricao_despesa = st.text_input("Descrição", key="desc_des_main")
+                valor_despesa = st.number_input("Valor (R$)", min_value=0.01, format="%.2f", step=0.01, key="val_des_main")
+                
+                submit_despesa = st.form_submit_button("Salvar Despesa")
+                if submit_despesa:
+                    save_transaction(
+                        data_despesa.strftime("%Y-%m-%d"), 
+                        categoria_despesa, 
+                        descricao_despesa, 
+                        valor_despesa * -1,
+                        cartao_despesa
+                    )
+                    st.success("Despesa salva com sucesso!")
+                    st.rerun()
+    
     # --- 1. FILTROS DE DATA ---
     with st.container(border=True):
         st.header("Filtros 📅")
@@ -318,8 +315,6 @@ with tab_dash:
 
     saldo_color_class = "kpi-value-positive" if saldo >= 0 else "kpi-value-negative"
 
-    # --- NOVO LAYOUT HTML/CSS PARA OS KPIs ---
-    # (Substitui o st.columns(3))
     st.markdown(f"""
     <div class="kpi-container">
         <div class="kpi-card">
@@ -336,14 +331,13 @@ with tab_dash:
         </div>
     </div>
     """, unsafe_allow_html=True)
-    # --- FIM DA MUDANÇA ---
     
     st.markdown("<br/>", unsafe_allow_html=True) 
 
     # --- 3. GRÁFICOS (Pizza) ---
     with st.container(border=True):
         st.header("Análise de Categorias 📊")
-        col_g1, col_g2 = st.columns(2) # Em mobile, isto vai empilhar
+        col_g1, col_g2 = st.columns(2)
         
         with col_g1:
             st.markdown("#### Distribuição de Despesas")
@@ -432,22 +426,27 @@ with tab_dash:
         if df_transacoes.empty:
             st.info("Nenhuma transação cadastrada no período.")
         else:
-            df_display = df_transacoes.copy()
-            df_display['Data'] = df_display['Data'].dt.strftime('%d/%m/%Y')
-            df_display = df_display[['id', 'Data', 'Categoria', 'Descricao', 'Valor', 'Cartao']]
-            df_display.set_index('id', inplace=True)
+            # Precisamos do df_display COM o 'id' como coluna normal para o filtro
+            df_display_table = df_transacoes.copy()
+            df_display_table['Data'] = df_display_table['Data'].dt.strftime('%d/%m/%Y')
+            df_display_table = df_display_table[['id', 'Data', 'Categoria', 'Descricao', 'Valor', 'Cartao']]
             
-            st.dataframe(df_display, use_container_width=True)
+            st.dataframe(
+                df_display_table.set_index('id'), # Mostra sem o índice 'id'
+                use_container_width=True
+            )
             
             st.markdown("#### Gerenciar Lançamentos")
             
+            # Usamos o df_display_table (com 'id' como coluna) para criar as opções
             def format_option(id):
-                if id not in df_display.index:
+                try:
+                    row = df_display_table[df_display_table['id'] == id].iloc[0]
+                    return f"ID: {id} | {row['Data']} | {row['Descricao']} (R$ {row['Valor']:.2f})"
+                except IndexError:
                     return "Selecione..."
-                row = df_display.loc[id]
-                return f"ID: {id} | {row['Data']} | {row['Descricao']} (R$ {row['Valor']:.2f})"
             
-            id_list = df_display.index.tolist()
+            id_list = df_display_table['id'].tolist()
 
             tab_excluir, tab_alterar = st.tabs([" Excluir Transação 🗑️", " Alterar Transação ✏️"])
 
@@ -481,53 +480,54 @@ with tab_dash:
                     )
                     
                     if id_para_alterar:
-                        conn = get_db_connection()
-                        transacao = conn.execute("SELECT * FROM transacoes WHERE id = ?", (id_para_alterar,)).fetchone()
-                        conn.close()
                         
-                        if transacao:
-                            default_date = datetime.strptime(transacao['Data'], "%Y-%m-%d").date()
-                            default_valor = transacao['Valor']
-                            default_descricao = transacao['Descricao']
-                            default_cartao = transacao['Cartao']
-                            default_categoria = transacao['Categoria']
-                            is_receita = default_valor > 0
+                        # --- LINHA CORRIGIDA ---
+                        # Busca no df_transacoes (que tem a coluna 'id') em vez do índice
+                        row_data = df_transacoes[df_transacoes['id'] == id_para_alterar].iloc[0]
+                        # --- FIM DA CORREÇÃO ---
+                        
+                        default_date = row_data['Data'].date()
+                        default_valor = row_data['Valor']
+                        default_descricao = row_data['Descricao']
+                        default_cartao = row_data['Cartao']
+                        default_categoria = row_data['Categoria']
+                        is_receita = default_valor > 0
+                        
+                        with st.form("form_alterar"):
+                            st.subheader(f"Alterando Transação ID: {id_para_alterar}")
                             
-                            with st.form("form_alterar"):
-                                st.subheader(f"Alterando Transação ID: {id_para_alterar}")
+                            novo_data = st.date_input("Data", value=default_date, key="edit_data")
+                            novo_descricao = st.text_input("Descrição", value=default_descricao, key="edit_desc")
+                            
+                            if is_receita:
+                                try: default_cat_index = CATEGORIAS_RECEITA.index(default_categoria)
+                                except ValueError: default_cat_index = 0
+                                novo_categoria = st.selectbox("Categoria", CATEGORIAS_RECEITA, index=default_cat_index, key="edit_cat_rec")
+                                novo_valor = st.number_input("Valor (R$)", min_value=0.01, value=default_valor, format="%.2f", key="edit_val_rec")
+                                novo_cartao = "N/A"
+                            
+                            else: # É Despesa
+                                try: default_cat_index = CATEGORIAS_DESPESA.index(default_categoria)
+                                except ValueError: default_cat_index = 0
+                                novo_categoria = st.selectbox("Categoria", CATEGORIAS_DESPESA, index=default_cat_index, key="edit_cat_des")
                                 
-                                novo_data = st.date_input("Data", value=default_date, key="edit_data")
-                                novo_descricao = st.text_input("Descrição", value=default_descricao, key="edit_desc")
+                                try: default_cartao_index = CARTOES.index(default_cartao)
+                                except ValueError: default_cartao_index = 0
+                                novo_cartao = st.selectbox("Cartão", CARTOES, index=default_cartao_index, key="edit_cartao")
                                 
-                                if is_receita:
-                                    try: default_cat_index = CATEGORIAS_RECEITA.index(default_categoria)
-                                    except ValueError: default_cat_index = 0
-                                    novo_categoria = st.selectbox("Categoria", CATEGORIAS_RECEITA, index=default_cat_index, key="edit_cat_rec")
-                                    novo_valor = st.number_input("Valor (R$)", min_value=0.01, value=default_valor, format="%.2f", key="edit_val_rec")
-                                    novo_cartao = "N/A"
-                                
-                                else: # É Despesa
-                                    try: default_cat_index = CATEGORIAS_DESPESA.index(default_categoria)
-                                    except ValueError: default_cat_index = 0
-                                    novo_categoria = st.selectbox("Categoria", CATEGORIAS_DESPESA, index=default_cat_index, key="edit_cat_des")
+                                novo_valor = st.number_input("Valor (R$)", min_value=0.01, value=abs(default_valor), format="%.2f", key="edit_val_des")
+                            
+                            submit_alterar = st.form_submit_button("Salvar Alterações")
+                            
+                            if submit_alterar:
+                                if not is_receita: novo_valor = novo_valor * -1
                                     
-                                    try: default_cartao_index = CARTOES.index(default_cartao)
-                                    except ValueError: default_cartao_index = 0
-                                    novo_cartao = st.selectbox("Cartão", CARTOES, index=default_cartao_index, key="edit_cartao")
-                                    
-                                    novo_valor = st.number_input("Valor (R$)", min_value=0.01, value=abs(default_valor), format="%.2f", key="edit_val_des")
-                                
-                                submit_alterar = st.form_submit_button("Salvar Alterações")
-                                
-                                if submit_alterar:
-                                    if not is_receita: novo_valor = novo_valor * -1
-                                        
-                                    update_transaction(
-                                        id_para_alterar, novo_data.strftime("%Y-%m-%d"),
-                                        novo_categoria, novo_descricao, novo_valor, novo_cartao
-                                    )
-                                    st.success("Transação alterada com sucesso!")
-                                    st.rerun()
+                                update_transaction(
+                                    id_para_alterar, novo_data.strftime("%Y-%m-%d"),
+                                    novo_categoria, novo_descricao, novo_valor, novo_cartao
+                                )
+                                st.success("Transação alterada com sucesso!")
+                                st.rerun()
 
 # =====================================================================
 # --- PÁGINA 2: CARTÕES DE CRÉDITO ---
