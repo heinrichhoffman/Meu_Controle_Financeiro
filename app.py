@@ -28,7 +28,6 @@ CARTOES = [
     "Elo", "Azul", "Caju", "Outro"
 ]
 
-# Colunas Definidas para DataFrames vazios
 COLUNAS_TRANSACOES = ["id", "Data", "Categoria", "Descricao", "Valor", "Cartao"]
 COLUNAS_FATURAS = ["id", "Cartao", "MesAno", "ValorFatura"]
 COLUNAS_ORCAMENTOS = ["Categoria", "Valor"]
@@ -104,39 +103,39 @@ def save_transaction(data, categoria, descricao, valor, cartao):
         )
         db_conn.commit()
         db_conn.close()
-    st.cache_data.clear()
+    st.cache_data.clear() # Limpa o cache de TODAS as funções @st.cache_data
 
-# --- FUNÇÕES DE LOAD CORRIGIDAS ---
+# --- FUNÇÕES DE LOAD CORRIGIDAS (com @st.cache_data e sem ttl) ---
+
+@st.cache_data 
 def load_transactions(start_date, end_date):
-    df = pd.DataFrame(columns=COLUNAS_TRANSACOES) # Inicializa um DF vazio
+    df = pd.DataFrame(columns=COLUNAS_TRANSACOES)
     try:
         if DB_TYPE == "sql":
             query = "SELECT * FROM transacoes WHERE Data BETWEEN :start AND :end ORDER BY Data DESC"
-            df = conn.query(query, params=dict(start=start_date, end=end_date), ttl=60)
+            df = conn.query(query, params=dict(start=start_date, end=end_date)) # ttl=60 removido
         else:
             query_sqlite = "SELECT * FROM transacoes WHERE Data BETWEEN ? AND ? ORDER BY Data DESC"
             db_conn = get_db_connection_sqlite()
             df = pd.read_sql_query(query_sqlite, db_conn, params=(start_date, end_date))
             db_conn.close()
     except Exception as e:
-        # Se a tabela não existir, a query falha. Nós pegamos o erro e retornamos o DF vazio.
         st.error(f"Erro ao carregar transações: {e}")
         return pd.DataFrame(columns=COLUNAS_TRANSACOES)
     
-    # --- CORREÇÃO DO KEYERROR ---
     if df.empty or 'Data' not in df.columns:
         return pd.DataFrame(columns=COLUNAS_TRANSACOES)
-    # --- FIM DA CORREÇÃO ---
 
     df['Data'] = pd.to_datetime(df['Data'])
     return df
 
+@st.cache_data
 def load_all_transactions():
-    df = pd.DataFrame(columns=COLUNAS_TRANSACOES) # Inicializa um DF vazio
+    df = pd.DataFrame(columns=COLUNAS_TRANSACOES)
     try:
         query = "SELECT * FROM transacoes ORDER BY Data DESC"
         if DB_TYPE == "sql":
-            df = conn.query(query, ttl=60)
+            df = conn.query(query) # ttl=60 removido
         else:
             db_conn = get_db_connection_sqlite()
             df = pd.read_sql_query(query, db_conn)
@@ -145,10 +144,8 @@ def load_all_transactions():
         st.error(f"Erro ao carregar todas as transações: {e}")
         return pd.DataFrame(columns=COLUNAS_TRANSACOES)
 
-    # --- CORREÇÃO DO KEYERROR ---
     if df.empty or 'Data' not in df.columns:
         return pd.DataFrame(columns=COLUNAS_TRANSACOES)
-    # --- FIM DA CORREÇÃO ---
 
     df['Data'] = pd.to_datetime(df['Data'])
     return df
@@ -209,12 +206,13 @@ def save_fatura(cartao, mes_ano, valor):
         db_conn.close()
     st.cache_data.clear()
 
+@st.cache_data
 def load_faturas():
-    df = pd.DataFrame(columns=COLUNAS_FATURAS) # Inicializa
+    df = pd.DataFrame(columns=COLUNAS_FATURAS)
     try:
         query = "SELECT * FROM faturas ORDER BY MesAno"
         if DB_TYPE == "sql":
-            df = conn.query(query, ttl=60)
+            df = conn.query(query) # ttl=60 removido
         else:
             db_conn = get_db_connection_sqlite()
             df = pd.read_sql_query(query, db_conn)
@@ -250,12 +248,13 @@ def save_budget(categoria, valor):
         db_conn.close()
     st.cache_data.clear()
 
+@st.cache_data
 def load_budgets():
-    df = pd.DataFrame(columns=COLUNAS_ORCAMENTOS) # Inicializa
+    df = pd.DataFrame(columns=COLUNAS_ORCAMENTOS)
     try:
         query = "SELECT * FROM orcamentos"
         if DB_TYPE == "sql":
-            df = conn.query(query, ttl=60)
+            df = conn.query(query) # ttl=60 removido
         else:
             db_conn = get_db_connection_sqlite()
             df = pd.read_sql_query(query, db_conn)
@@ -353,7 +352,7 @@ tab_dash, tab_cartoes, tab_orcamento = st.tabs([
 with tab_dash:
     today_dash = datetime.now() 
 
-    # --- CORREÇÃO MOBILE: Formulários movidos da Sidebar para o Expander ---
+    # --- Formulários movidos para o Expander ---
     with st.expander("Adicionar Transação ✍️", expanded=False):
         tab_receita, tab_despesa = st.tabs([" Receita ", " Despesa "])
 
